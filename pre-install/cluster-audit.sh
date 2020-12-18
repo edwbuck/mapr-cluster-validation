@@ -36,7 +36,7 @@ function print_help() {
 }
 
 # Handle script options
-DBG=""
+DEBUG=""
 group=all
 cluser=""
 OPTERROR=0
@@ -46,7 +46,7 @@ eval set -- "$OPTS"
 while (( $# ))
 do
   case $1 in
-    -d|--debug)    DBG=true;       shift 1 ;;
+    -d|--debug)    DEBUG=true;       shift 1 ;;
     -h|--help)     print_help;     exit 0 ;;
     -v|--verbose)  VERBOSE=true;   shift 1 ;;
     -g)            group=$2;       shift 2 ;;
@@ -56,7 +56,7 @@ do
   esac
 done
  
-[ -n "$DBG" ] && set -x
+[ -n "$DEBUG" ] && set -x
 
 # Set some global variables
 printf -v sep '#%.0s' {1..80} #Set sep to 80 # chars
@@ -106,7 +106,7 @@ else
    clush() { eval "$@"; } #clush becomes no-op, all commands run locally doing a single node inspection
    #clush() { for h in $(<~/host.list); do; ssh $h $@; done; } #ssh in for loop
 fi
-if [[ -n "$DBG" ]]; then
+if [[ -n "$DEBUG" ]]; then
   clush $parg $parg1 ${parg3/0 /} date || { 
     echo clush failed
     echo ""
@@ -172,8 +172,8 @@ case $distro in
    ;;
 esac
 
-[ -n "$DBG" ] && { echo sysd: $sysd; echo srvid: $srvid; echo SUDO: $SUDO; echo parg: $parg; echo node: $node; }
-[ -n "$DBG" ] && exit
+[ -n "$DEBUG" ] && { echo sysd: $sysd; echo srvid: $srvid; echo SUDO: $SUDO; echo parg: $parg; echo node: $node; }
+[ -n "$DEBUG" ] && exit
 
 
 echo;echo "#################### Hardware audits ###############################"
@@ -209,7 +209,7 @@ clush $parg ${SUDO:-} "ip link show |sed '/ lo: /,+1d; /@.*:/,+1d' |awk '/UP/{su
 #TBD: fix SUDO to find ethtool, not /sbin/ethtool
 #clush $parg "echo -n 'Nic Speed: '; /sbin/ip link show | sed '/ lo: /,+1d' | awk '/UP/{sub(\":\",\"\",\$2);print \$2}' | xargs -l -I % cat /sys/class/net/%/speed"
 echo $sep
-[ -n "$DBG" ] && exit
+[ -n "$DEBUG" ] && exit
 
 # probe for disk info ###############
 #TBD: Probe disk controller settings, needs storcli64 binary, won't work on HP which needs smartarray tool
