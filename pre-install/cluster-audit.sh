@@ -1,39 +1,61 @@
 #!/usr/bin/env bash
-# jbenninghoff 2013-Oct-06  vi: set ai et sw=3 tabstop=3:
-# shellcheck disable=SC2162,SC2086,SC2046,SC2016
+# vi: set autoindent smartindent expandtab shiftwidth=2 tabstop=2:
+#
+# 2013-OCT-06 jbenninghoff <John Benninghoff>
+# 2020-DEC-18 edwbuck      <Edwin Buck>       edwin.buck@hpe.com
 #set -o nounset errexit
 
-usage() {
-cat << EOF
-Usage: $0 -g -d -l -s <mapr-service-acct-name>
--g To specify clush group other than "all"
--d To enable debug output
--l To specify clush/ssh user other than $USER
--s To specify a service account name other than "mapr"
+# captured called as information
+CALLED_AS=$_
+PROCESS_STATUS=$(ps -o stat= -p $PPID)
+export CALLED_AS
+export PROCESS_STATUS
 
-This script is a sequence of parallel shell commands probing for
-current system configuration and highlighting differences between
-the nodes in a cluster.
+# capture self information
+SELF=$(readlink -nf "$0")
+SCRIPT_NAME=$(basename "${SELF}")
+SCRIPT_DIR=$(basename "${SELF}")
+export SCRIPT_NAME
+export SCRIPT_DIR
 
-The script requires that the clush utility (a parallel ssh tool)
-be installed and configured using passwordless ssh connectivity for root to
-all the nodes under test.  Or passwordless sudo for a non-root account.
-Use -l mapr for example if mapr account has passwordless sudo rights.
-
-EOF
+function print_help() {
+    echo ""
+    echo "Usage: ${SCRIPT_NAME} [options]"
+    echo ""
+    echo "Options:"
+    echo "      -g <clush-group> : Use the clush group <clush-group>."
+    echo "         -l <ssh-user> : Connect with ssh user <ssh-user>."
+    echo "  -s <service-account> : Specify the mapr service account is <service-account>."
+    echo ""
+    echo "             -h/--help : Display this help and exit."
+    echo "            -d/--debug : Display control flow path."
+    echo "          -v/--verbose : Display audit progress."
+    echo ""
+    echo "Validates operating system settings for MapR clusters."
+    echo ""
 }
 
 # Handle script options
-DBG=""; group=all; cluser=""
-while getopts "dl:g:s:" opt; do
-  case $opt in
-    d) DBG=true ;;
-    g) group=$OPTARG ;;
-    l) cluser="-l $OPTARG" ;;
-    s) srvid="$OPTARG" ;;
-    \?) usage; exit ;;
+DBG=""
+group=all
+cluser=""
+OPTERROR=0
+OPTS=$(getopt -u --options dhl:g:s: --longoptions debug,help,verbose -- "$@")
+if [[ $? -ne 0 ]]; then echo ""; print_help; exit 1; fi
+eval set -- "$OPTS"
+while (( $# ))
+do
+  case $1 in
+    -d|--debug)    DBG=true;       shift 1 ;;
+    -h|--help)     print_help;     exit 0 ;;
+    -v|--verbose)  VERBOSE=true;   shift 1 ;;
+    -g)            group=$2;       shift 2 ;;
+    -l)            cluser="-l $2"; shift 2 ;;
+    -s)            srvid="$2";     shift 2 ;;
+    --)                            shift 1; break;;
   esac
 done
+ 
 [ -n "$DBG" ] && set -x
 
 # Set some global variables
@@ -85,7 +107,15 @@ else
    #clush() { for h in $(<~/host.list); do; ssh $h $@; done; } #ssh in for loop
 fi
 if [[ -n "$DBG" ]]; then
-   clush $parg $parg1 ${parg3/0 /} date || { echo clush failed; usage; exit 3; }
+  clush $parg $parg1 ${parg3/0 /} date || { 
+    echo clush failed
+    echo ""
+    echo "The script requires that the clush utility (a parallel ssh tool)"
+    echo "be installed and configured using passwordless ssh connectivity for root to"
+    echo "all the nodes under test.  Or passwordless sudo for a non-root account."
+    echo "Use -l mapr for example if mapr account has passwordless sudo rights."
+    exit 3; 
+  }
 fi
 
 # Locate or guess MapR Service Account
