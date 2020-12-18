@@ -23,40 +23,90 @@ function print_help() {
     echo "Usage: ${SCRIPT_NAME} [options]"
     echo ""
     echo "Options:"
-    echo "      -g <clush-group> : Use the clush group <clush-group>."
-    echo "         -l <ssh-user> : Connect with ssh user <ssh-user>."
-    echo "  -s <service-account> : Specify the mapr service account is <service-account>."
+    echo "   -g/--group <clush-group> : Check nodes in clush group @<clush-group>."
+    echo "  -n/--nodes <node-pattern> : Check nodes in <node-pattern>."
+    echo "              -l <ssh-user> : Connect with ssh user <ssh-user>."
+    echo "       -s <service-account> : Specify the mapr service account is <service-account>."
     echo ""
-    echo "             -h/--help : Display this help and exit."
-    echo "            -d/--debug : Display control flow path."
-    echo "          -v/--verbose : Display audit progress."
+    echo "                  -h/--help : Display this help and exit."
+    echo "                 -d/--debug : Display control flow path."
+    echo "               -v/--verbose : Display audit progress."
     echo ""
     echo "Validates operating system settings for MapR clusters."
     echo ""
 }
 
 # Handle script options
-DEBUG=""
-group=all
 cluser=""
-OPTERROR=0
-OPTS=$(getopt -u --options dhl:g:s: --longoptions debug,help,verbose -- "$@")
+OPTS=$(getopt -u --options dhg:l:n:s:v --longoptions debug,help,group:,nodes:,verbose -- "$@")
 if [[ $? -ne 0 ]]; then echo ""; print_help; exit 1; fi
+[[ -n $DEBUG ]] && echo "${OPTS}"
 eval set -- "$OPTS"
 while (( $# ))
 do
   case $1 in
-    -d|--debug)    DEBUG=true;       shift 1 ;;
+    -d|--debug)    DEBUG=true;     shift 1 ;;
     -h|--help)     print_help;     exit 0 ;;
     -v|--verbose)  VERBOSE=true;   shift 1 ;;
-    -g)            group=$2;       shift 2 ;;
+    -n|--nodes)    NODE_LINE=$2;   shift 2 ;;
+    -g|--group)    group=$2;       shift 2 ;;
     -l)            cluser="-l $2"; shift 2 ;;
     -s)            srvid="$2";     shift 2 ;;
     --)                            shift 1; break;;
   esac
 done
+
+[[ -n ${DEBUG} ]] && echo "NODE_LINE = ${NODE_LINE}"
  
-[ -n "$DEBUG" ] && set -x
+#check for distro, works on RHEL,CENTOS,Debina,Ubuntu,Mint,SuSE
+DISTRO_ID=$(awk 'BEGIN{ FS="=" } $1=="ID" {gsub(/"/, "", $2); print $2}' /etc/os-release)
+[[ $DEBUG ]] && echo "DISTRO_ID = $DISTRO_ID"
+[[ $VERBOSE ]] && echo "Detected distro is $DISTRO_ID"
+DISTRO_ID_LIKE=( $(awk 'BEGIN{ FS="=" } $1=="ID_LIKE" {gsub(/"/, "", $2); print $2}' /etc/os-release) )
+[[ $DEBUG ]] && echo "DISTRO_ID_LIKE = ${DISTRO_ID_LIKE[*]}"
+
+SUPPORTED_DISTROS=( rhel sles ubuntu )
+if [[ " ${SUPPORTED_DISTROS[@]} " == *" $DISTRO_ID "* ]]; then
+  EFFECTIVE_DISTRO=$DISTRO_ID
+  [[ $DEBUG ]] && echo "EFFECTIVE_DISTO = $EFFECTIVE_DISTRO"
+else
+  for SIMILAR_DISTRO in "${DISTRO_ID_LIKE[@]}"
+  do
+    if [[ " ${SUPPORTED_DISTROS[@]} " == *" $SIMILAR_DISTRO "* ]]; then
+      EFFECTIVE_DISTRO=$SIMILAR_DISTRO
+      [[ $DEBUG ]] && echo "EFFECTIVE_DISTO = $EFFECTIVE_DISTRO"
+      [[ $VERBOSE ]] && echo "treating distro like ${EFFECTIVE_DISTRO}"
+      break
+    fi
+  done
+fi
+
+if [[ -z ${EFFECTIVE_DISTRO} ]]; then 
+  echo "unsupported distro $DISTRO_ID"; 
+  exit -1;
+fi
+
+if [[ -n ${NODE_LINE} ]]; then
+  [[ -n $DEBUG ]] && echo "nodes set from NODE_LINE ${NODE_LINE}"
+  NODE_EXPRESSIONS=$( echo "${NODE_LINE}" | awk 'BEGIN { FPAT="([^,]+)|([^,]*\\[[^\\]]*\\][^,]*)" } { for (i = 1; i <= NF; i++) { ORS=" "; print $i } }' )
+  for NODE_EXPRESSION in "${NODE_EXPRESSIONS[@]}"
+  do
+    [[ -n $DEBUG ]] && echo "NODE_EXPRESSION = $NODE_EXPRESSION"
+    NODES+=( $(eval echo "$(echo "$NODE_EXPRESSION" | sed -e 's/\[\([^],-]\+\)\]/\1/g' -e 's/\[\([^],-]\+\),/{\1,/g' -e 's/,\([^],-]\+\)\]/,\1}/g' -e 's/\[\([^],-]\+\)-\([^],-]\+\)\]/{\1..\2}/g' -e 's/\[\([^],-]\+\)-\([^],-]\+\),/{{\1..\2},/g' -e 's/,\([^],-]\+\)-\([^],-]\+\),/,{\1..\2},/g' -e 's/,\([^],-]\+\)-\([^],-]\+\)\]/,{\1..\2}}/g')" ) )
+  done
+elif [[ -n ${group} ]]; then
+  [[ -n $DEBUG ]] && echo "nodes set from clush group $group"
+  NODES=( $(nodeset -e "@${group}") )
+else
+  [[ -n $DEBUG ]] && echo "nodes set from clush group all"
+  NODES=( $(nodeset -e @all) )
+fi
+[[ -n ${VERBOSE} ]] && echo "Testing nodes ( ${NODES[*]} )"
+
+#clush $parg "echo DMI Sys Info:; ${SUDO:-} dmidecode | grep -A2 '^System Information'"; echo $sep
+exit 0
+
+[[ -n group ]] && group=all
 
 # Set some global variables
 printf -v sep '#%.0s' {1..80} #Set sep to 80 # chars
@@ -69,9 +119,12 @@ else
 fi
 distro=${distro,,} #make lowercase
 [[ "$(uname -s)" == "Darwin" ]] && alias sed=gsed
-#distro=$(lsb_release -is | tr [[:upper:]] [[:lower:]])
+
 #Turn the BOKS chatter down
 export BOKS_SUDO_NO_WARNINGS=1
+
+#check ssh to all nodes
+
 
 # Check for clush and provide alt if not found
 if type clush >& /dev/null; then
@@ -189,6 +242,7 @@ clush $parg "echo DMI BIOS:; ${SUDO:-} dmidecode |grep -A3 '^BIOS I'"; echo $sep
 clush $parg "grep '^model name' /proc/cpuinfo | sort -u"; echo $sep
 clush $parg "lscpu | grep -v -e op-mode -e ^Vendor -e family -e Model: -e Stepping: -e BogoMIPS -e Virtual -e ^Byte -e '^NUMA node(s)' -e '^CPU MHz:' -e ^Flags -e cache: "
 echo $sep
+
 #clush $parg "lscpu | grep -v -e op-mode -e ^Vendor -e family -e Model: -e Stepping: -e BogoMIPS -e Virtual -e ^Byte -e '^NUMA node(s)' | awk '/^CPU MHz:/{sub(\$3,sprintf(\"%0.0f\",\$3))};{print}'"; echo $sep
 #clush $parg "lscpu | grep -e ^Thread"; echo $sep
 #TBD: grep '^model name' /proc/cpuinfo | sed 's/.*CPU[ ]*\(.*\)[ ]*@.*/\1/'
